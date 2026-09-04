@@ -29,9 +29,9 @@ front end. See [HLD.md](./HLD.md) for the architecture and
   via LangChain) to narrate the likely root cause and propose a reconciled
   number, with a confidence level and a recommended approver.
 - Lets a user select their role (Store Planner, Line Planner, Class
-  Planner, Finance, Merchandising Lead), approve top-down, bottom-up, or
-  the reconciled number per class, or propose their own number with a
-  justification.
+  Planner, Finance, Merchandising Lead), approve top-down, bottom-up, the
+  reconciled number, or a proposed forecast per class, or propose their
+  own number with a justification.
 - Persists every recommendation, proposal, and approval to SQLite as an
   immutable, chained lineage event — viewable per class in the UI, and
   queryable directly from the database file.
@@ -117,14 +117,20 @@ an `agent_recommendation` lineage event.
 
 ### 4. Approve, or propose an alternative
 
-- Click one of the three **Approve** buttons to accept the top-down
-  target, the bottom-up consensus, or the agent's reconciled number.
-  Approved rows accumulate in the "Approved reconciliations" table,
-  downloadable as CSV, tagged with your role.
+- Click one of the **Approve** buttons to accept the top-down target, the
+  bottom-up consensus, or the agent's reconciled number. Approved rows
+  accumulate in the "Approved reconciliations" table, downloadable as CSV,
+  tagged with your role.
 - Or, if you disagree with the agent's number, fill in **Propose a
   different forecast** with your own value and a required justification,
   then click **Submit proposal**. This is recorded against your role and
-  chained to whatever the previous number was.
+  chained to whatever the previous number was — it does not become
+  official on its own.
+- To make a submitted proposal the official number, click **Approve: use
+  proposed forecast**. This looks up the latest proposal for the selected
+  class, records it as the approved value, and notes in the lineage who
+  originally proposed it. If no proposal exists yet for the class, you'll
+  get a message instead of a silent no-op.
 
 ### 5. Review the lineage
 

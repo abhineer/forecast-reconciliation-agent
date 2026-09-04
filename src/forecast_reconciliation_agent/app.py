@@ -142,6 +142,7 @@ def build_demo() -> gr.Blocks:
                     accept_topdown_btn = gr.Button("Approve: use top-down target")
                     accept_bottomup_btn = gr.Button("Approve: use bottom-up consensus")
                     accept_reconciled_btn = gr.Button("Approve: use reconciled number", variant="primary")
+                    accept_proposed_btn = gr.Button("Approve: use proposed forecast")
 
                 gr.Markdown("### Approved reconciliations")
                 approved_df = gr.Dataframe(label="Approved plan (this session)", interactive=False)
@@ -220,13 +221,8 @@ def build_demo() -> gr.Blocks:
             )
             return _format_recommendation(result), result, agent, _lineage_view(class_name)
 
-        def _record_decision(decision_label, value_key, result, approved, role):
-            if result is None:
-                return approved, gr.update(), _lineage_view(None)
+        def _record_decision(decision_label, value, justification, result, approved, role):
             s, r = result["signals"], result["recommendation"]
-            value = s["top_down_target"] if value_key == "top_down_target" else (
-                s["bottom_up_consensus"] if value_key == "bottom_up_consensus" else r["reconciled_number"]
-            )
             db.record_event(
                 class_name=s["class"],
                 event_type="approval",
@@ -234,7 +230,7 @@ def build_demo() -> gr.Blocks:
                 category=s["category"],
                 season=s["season"],
                 role=role,
-                justification=f"Approved via '{decision_label}' decision.",
+                justification=justification,
                 top_down_target=s["top_down_target"],
                 bottom_up_consensus=s["bottom_up_consensus"],
                 confidence=r["confidence"],
@@ -256,13 +252,55 @@ def build_demo() -> gr.Blocks:
             return approved, gr.update(value=csv_path, visible=True), _lineage_view(s["class"])
 
         def on_accept_topdown(result, approved, role):
-            return _record_decision("top_down", "top_down_target", result, approved, role)
+            if result is None:
+                return approved, gr.update(), _lineage_view(None)
+            s = result["signals"]
+            return _record_decision(
+                "top_down", s["top_down_target"], "Approved via 'top_down' decision.", result, approved, role
+            )
 
         def on_accept_bottomup(result, approved, role):
-            return _record_decision("bottom_up", "bottom_up_consensus", result, approved, role)
+            if result is None:
+                return approved, gr.update(), _lineage_view(None)
+            s = result["signals"]
+            return _record_decision(
+                "bottom_up", s["bottom_up_consensus"], "Approved via 'bottom_up' decision.", result, approved, role
+            )
 
         def on_accept_reconciled(result, approved, role):
-            return _record_decision("reconciled", "reconciled_number", result, approved, role)
+            if result is None:
+                return approved, gr.update(), _lineage_view(None)
+            r = result["recommendation"]
+            return _record_decision(
+                "reconciled", r["reconciled_number"], "Approved via 'reconciled' decision.", result, approved, role
+            )
+
+        def on_accept_proposed(result, approved, role):
+            if result is None:
+                return approved, gr.update(), _lineage_view(None), "Select and analyze a class first."
+            s = result["signals"]
+            proposal = db.get_latest_proposal(s["class"])
+            if proposal is None:
+                return (
+                    approved,
+                    gr.update(),
+                    _lineage_view(s["class"]),
+                    f"No proposal has been submitted yet for **{s['class']}**.",
+                )
+            value = proposal["new_value"]
+            justification = (
+                f"Approved via 'proposed_forecast' decision "
+                f"(originally proposed by {proposal['role']}: {proposal['justification']})."
+            )
+            approved, download_update, lineage = _record_decision(
+                "proposed_forecast", value, justification, result, approved, role
+            )
+            return (
+                approved,
+                download_update,
+                lineage,
+                f"Approved **{s['class']}** using the proposed forecast: {value:,.0f}.",
+            )
 
         def on_propose(class_name, value, justification, role):
             if not class_name:
@@ -315,6 +353,11 @@ def build_demo() -> gr.Blocks:
             on_accept_reconciled,
             inputs=[last_result_state, approved_state, role_dropdown],
             outputs=[approved_state, download_btn, lineage_df],
+        )
+        accept_proposed_btn.click(
+            on_accept_proposed,
+            inputs=[last_result_state, approved_state, role_dropdown],
+            outputs=[approved_state, download_btn, lineage_df, proposal_status_md],
         )
 
         propose_btn.click(

@@ -135,3 +135,17 @@ def get_latest_value(class_name: str, db_path: str | Path | None = None) -> dict
     with _connect(db_path) as conn:
         row = _latest_event(conn, class_name)
         return dict(row) if row is not None else None
+
+
+def get_latest_proposal(class_name: str, db_path: str | Path | None = None) -> dict | None:
+    """Most recent `user_proposal` event for a class, or None if none exists."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM forecast_events
+            WHERE class_name = ? AND event_type = 'user_proposal'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (class_name,),
+        ).fetchone()
+        return dict(row) if row is not None else None
