@@ -15,7 +15,8 @@ number — who changed it, in what order, and why — is always available for
 audit.
 
 Built with **LangChain**, **Groq** (`openai/gpt-oss-20b`), and a **Gradio**
-front end. See [HLD.md](./HLD.md) for the architecture.
+front end. See [HLD.md](./HLD.md) for the architecture and
+[ROADMAP.md](./ROADMAP.md) for what's next.
 
 ## What it does
 
