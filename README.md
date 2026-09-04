@@ -103,7 +103,9 @@ The **Reconciliation Dashboard** tab loads the sample dataset automatically
 and shows every merchandise class sorted by the size of its top-down vs.
 bottom-up gap, along with the root-cause flags that were triggered
 (`rate_of_sale_shift`, `carryover_assumption`, `new_store_ramp`,
-`planner_disagreement`, `unexplained_gap`).
+`planner_disagreement`, `unexplained_gap`). A bar chart below the table
+shows the same gap % per class, sorted largest to smallest, colored by
+whether the top-down target or the bottom-up consensus is ahead.
 
 To reconcile your own data instead, upload a CSV with the same columns as
 `sample_data/plans.csv`.
@@ -138,7 +140,9 @@ The **Forecast lineage** table shows the full, chronologically ordered
 history for the currently selected class: every agent recommendation,
 proposal, and approval, with who made it, the previous and new value, and
 the justification behind it. This comes straight from the SQLite database,
-so it survives app restarts.
+so it survives app restarts. Below the table, a line chart plots the same
+history as a trajectory of the forecast number over time, so you can see
+at a glance whether proposals and approvals pulled the number up or down.
 
 ### 6. Ask the copilot
 

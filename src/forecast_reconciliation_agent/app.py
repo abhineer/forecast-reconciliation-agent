@@ -47,6 +47,9 @@ LINEAGE_COLUMNS = [
 ]
 
 
+LINEAGE_CHART_COLUMNS = ["created_at", "new_value", "event_type", "role"]
+
+
 def _lineage_view(class_name: str | None) -> pd.DataFrame:
     if not class_name:
         return pd.DataFrame(columns=LINEAGE_COLUMNS)
@@ -57,17 +60,36 @@ def _lineage_view(class_name: str | None) -> pd.DataFrame:
     return view[LINEAGE_COLUMNS]
 
 
+def _lineage_chart_data(class_name: str | None) -> pd.DataFrame:
+    if not class_name:
+        return pd.DataFrame(columns=LINEAGE_CHART_COLUMNS)
+    events = db.get_lineage(class_name)
+    if not events:
+        return pd.DataFrame(columns=LINEAGE_CHART_COLUMNS)
+    view = pd.DataFrame.from_records(events)
+    view["created_at"] = pd.to_datetime(view["created_at"])
+    view["role"] = view["role"].fillna("agent")
+    return view[LINEAGE_CHART_COLUMNS]
+
+
 def _build_agent() -> ForecastReconciliationAgent:
     return ForecastReconciliationAgent(df=load_plans())
 
 
-def _variance_view(df: pd.DataFrame) -> pd.DataFrame:
+def _variance_outputs(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Returns (table view, chart data) computed from a single pass over the plans."""
     from forecast_reconciliation_agent.reconciliation import build_variance_table
 
     table = build_variance_table(df)
+
     view = table[VARIANCE_COLUMNS].copy()
     view["flags"] = view["flags"].apply(lambda f: ", ".join(f) if f else "-")
-    return view
+
+    chart = table[["class", "gap_pct"]].copy()
+    chart["direction"] = chart["gap_pct"].apply(
+        lambda v: "Top-down ahead of bottom-up" if v >= 0 else "Bottom-up ahead of top-down"
+    )
+    return view, chart
 
 
 def _format_recommendation(result: dict) -> str:
@@ -131,6 +153,20 @@ def build_demo() -> gr.Blocks:
                     load_btn = gr.Button("Load sample data", variant="secondary")
 
                 variance_df = gr.Dataframe(label="Top-down vs. bottom-up variance, all classes", interactive=False)
+                variance_chart = gr.BarPlot(
+                    x="class",
+                    y="gap_pct",
+                    color="direction",
+                    color_map={
+                        "Top-down ahead of bottom-up": "#f59e0b",
+                        "Bottom-up ahead of top-down": "#3b82f6",
+                    },
+                    title="Gap %: top-down target vs. bottom-up consensus, by class",
+                    y_title="Gap %",
+                    sort="-y",
+                    x_label_angle=45,
+                    height=320,
+                )
 
                 with gr.Row():
                     class_dropdown = gr.Dropdown(label="Select a class to reconcile", choices=[])
@@ -164,6 +200,13 @@ def build_demo() -> gr.Blocks:
 
                 gr.Markdown("### Forecast lineage")
                 lineage_df = gr.Dataframe(label="Full history for the selected class", interactive=False)
+                lineage_chart = gr.LinePlot(
+                    x="created_at",
+                    y="new_value",
+                    title="How the forecast number for this class has changed",
+                    tooltip=["created_at", "new_value", "event_type", "role"],
+                    height=280,
+                )
 
             # ---------------- Copilot tab ----------------
             with gr.Tab("Ask the Copilot"):
@@ -186,26 +229,26 @@ def build_demo() -> gr.Blocks:
         def on_load_sample(agent):
             agent = _ensure_agent(agent)
             agent.load_data(load_plans())
-            table = _variance_view(agent.df)
+            table, chart = _variance_outputs(agent.df)
             choices = sorted(agent.df["class"].unique().tolist())
-            return agent, table, gr.update(choices=choices, value=choices[0] if choices else None)
+            return agent, table, chart, gr.update(choices=choices, value=choices[0] if choices else None)
 
         def on_upload(file, agent):
             agent = _ensure_agent(agent)
             if file is None:
-                table = _variance_view(agent.df)
+                table, chart = _variance_outputs(agent.df)
                 choices = sorted(agent.df["class"].unique().tolist())
-                return agent, table, gr.update(choices=choices)
+                return agent, table, chart, gr.update(choices=choices)
             df = load_plans(file.name)
             agent.load_data(df)
-            table = _variance_view(agent.df)
+            table, chart = _variance_outputs(agent.df)
             choices = sorted(agent.df["class"].unique().tolist())
-            return agent, table, gr.update(choices=choices, value=choices[0] if choices else None)
+            return agent, table, chart, gr.update(choices=choices, value=choices[0] if choices else None)
 
         def on_analyze(class_name, agent):
             agent = _ensure_agent(agent)
             if not class_name:
-                return "Select a class first.", None, agent, _lineage_view(class_name)
+                return "Select a class first.", None, agent, _lineage_view(class_name), _lineage_chart_data(class_name)
             result = agent.reconcile_class(class_name)
             s, r = result["signals"], result["recommendation"]
             db.record_event(
@@ -219,7 +262,13 @@ def build_demo() -> gr.Blocks:
                 bottom_up_consensus=s["bottom_up_consensus"],
                 confidence=r["confidence"],
             )
-            return _format_recommendation(result), result, agent, _lineage_view(class_name)
+            return (
+                _format_recommendation(result),
+                result,
+                agent,
+                _lineage_view(class_name),
+                _lineage_chart_data(class_name),
+            )
 
         def _record_decision(decision_label, value, justification, result, approved, role):
             s, r = result["signals"], result["recommendation"]
@@ -249,11 +298,16 @@ def build_demo() -> gr.Blocks:
             approved = pd.concat([approved, pd.DataFrame([row])], ignore_index=True)
             csv_path = os.path.join(tempfile.gettempdir(), "approved_reconciliation_plan.csv")
             approved.to_csv(csv_path, index=False)
-            return approved, gr.update(value=csv_path, visible=True), _lineage_view(s["class"])
+            return (
+                approved,
+                gr.update(value=csv_path, visible=True),
+                _lineage_view(s["class"]),
+                _lineage_chart_data(s["class"]),
+            )
 
         def on_accept_topdown(result, approved, role):
             if result is None:
-                return approved, gr.update(), _lineage_view(None)
+                return approved, gr.update(), _lineage_view(None), _lineage_chart_data(None)
             s = result["signals"]
             return _record_decision(
                 "top_down", s["top_down_target"], "Approved via 'top_down' decision.", result, approved, role
@@ -261,7 +315,7 @@ def build_demo() -> gr.Blocks:
 
         def on_accept_bottomup(result, approved, role):
             if result is None:
-                return approved, gr.update(), _lineage_view(None)
+                return approved, gr.update(), _lineage_view(None), _lineage_chart_data(None)
             s = result["signals"]
             return _record_decision(
                 "bottom_up", s["bottom_up_consensus"], "Approved via 'bottom_up' decision.", result, approved, role
@@ -269,7 +323,7 @@ def build_demo() -> gr.Blocks:
 
         def on_accept_reconciled(result, approved, role):
             if result is None:
-                return approved, gr.update(), _lineage_view(None)
+                return approved, gr.update(), _lineage_view(None), _lineage_chart_data(None)
             r = result["recommendation"]
             return _record_decision(
                 "reconciled", r["reconciled_number"], "Approved via 'reconciled' decision.", result, approved, role
@@ -277,7 +331,7 @@ def build_demo() -> gr.Blocks:
 
         def on_accept_proposed(result, approved, role):
             if result is None:
-                return approved, gr.update(), _lineage_view(None), "Select and analyze a class first."
+                return approved, gr.update(), _lineage_view(None), _lineage_chart_data(None), "Select and analyze a class first."
             s = result["signals"]
             proposal = db.get_latest_proposal(s["class"])
             if proposal is None:
@@ -285,6 +339,7 @@ def build_demo() -> gr.Blocks:
                     approved,
                     gr.update(),
                     _lineage_view(s["class"]),
+                    _lineage_chart_data(s["class"]),
                     f"No proposal has been submitted yet for **{s['class']}**.",
                 )
             value = proposal["new_value"]
@@ -292,23 +347,28 @@ def build_demo() -> gr.Blocks:
                 f"Approved via 'proposed_forecast' decision "
                 f"(originally proposed by {proposal['role']}: {proposal['justification']})."
             )
-            approved, download_update, lineage = _record_decision(
+            approved, download_update, lineage, chart = _record_decision(
                 "proposed_forecast", value, justification, result, approved, role
             )
             return (
                 approved,
                 download_update,
                 lineage,
+                chart,
                 f"Approved **{s['class']}** using the proposed forecast: {value:,.0f}.",
             )
 
         def on_propose(class_name, value, justification, role):
             if not class_name:
-                return "Select and analyze a class first.", _lineage_view(class_name)
+                return "Select and analyze a class first.", _lineage_view(class_name), _lineage_chart_data(class_name)
             if value is None:
-                return "Enter a proposed forecast value.", _lineage_view(class_name)
+                return "Enter a proposed forecast value.", _lineage_view(class_name), _lineage_chart_data(class_name)
             if not justification or not justification.strip():
-                return "A justification is required for a proposal.", _lineage_view(class_name)
+                return (
+                    "A justification is required for a proposal.",
+                    _lineage_view(class_name),
+                    _lineage_chart_data(class_name),
+                )
             db.record_event(
                 class_name=class_name,
                 event_type="user_proposal",
@@ -319,6 +379,7 @@ def build_demo() -> gr.Blocks:
             return (
                 f"Proposal recorded for **{class_name}** by {role}: {value:,.0f}.",
                 _lineage_view(class_name),
+                _lineage_chart_data(class_name),
             )
 
         def on_chat(message, history, agent):
@@ -329,41 +390,45 @@ def build_demo() -> gr.Blocks:
             history = history + [{"role": "assistant", "content": reply}]
             return history, "", agent
 
-        demo.load(on_load_sample, inputs=[agent_state], outputs=[agent_state, variance_df, class_dropdown])
-        load_btn.click(on_load_sample, inputs=[agent_state], outputs=[agent_state, variance_df, class_dropdown])
-        csv_upload.change(on_upload, inputs=[csv_upload, agent_state], outputs=[agent_state, variance_df, class_dropdown])
+        demo.load(on_load_sample, inputs=[agent_state], outputs=[agent_state, variance_df, variance_chart, class_dropdown])
+        load_btn.click(on_load_sample, inputs=[agent_state], outputs=[agent_state, variance_df, variance_chart, class_dropdown])
+        csv_upload.change(
+            on_upload,
+            inputs=[csv_upload, agent_state],
+            outputs=[agent_state, variance_df, variance_chart, class_dropdown],
+        )
 
         analyze_btn.click(
             on_analyze,
             inputs=[class_dropdown, agent_state],
-            outputs=[recommendation_md, last_result_state, agent_state, lineage_df],
+            outputs=[recommendation_md, last_result_state, agent_state, lineage_df, lineage_chart],
         )
 
         accept_topdown_btn.click(
             on_accept_topdown,
             inputs=[last_result_state, approved_state, role_dropdown],
-            outputs=[approved_state, download_btn, lineage_df],
+            outputs=[approved_state, download_btn, lineage_df, lineage_chart],
         )
         accept_bottomup_btn.click(
             on_accept_bottomup,
             inputs=[last_result_state, approved_state, role_dropdown],
-            outputs=[approved_state, download_btn, lineage_df],
+            outputs=[approved_state, download_btn, lineage_df, lineage_chart],
         )
         accept_reconciled_btn.click(
             on_accept_reconciled,
             inputs=[last_result_state, approved_state, role_dropdown],
-            outputs=[approved_state, download_btn, lineage_df],
+            outputs=[approved_state, download_btn, lineage_df, lineage_chart],
         )
         accept_proposed_btn.click(
             on_accept_proposed,
             inputs=[last_result_state, approved_state, role_dropdown],
-            outputs=[approved_state, download_btn, lineage_df, proposal_status_md],
+            outputs=[approved_state, download_btn, lineage_df, lineage_chart, proposal_status_md],
         )
 
         propose_btn.click(
             on_propose,
             inputs=[class_dropdown, proposal_value, proposal_justification, role_dropdown],
-            outputs=[proposal_status_md, lineage_df],
+            outputs=[proposal_status_md, lineage_df, lineage_chart],
         )
 
         approved_state.change(lambda a: a, inputs=[approved_state], outputs=[approved_df])
