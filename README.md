@@ -170,3 +170,7 @@ This is a scoped-down demo, not a production integration:
 - Roles are self-declared in a dropdown, not enforced by authentication.
 - Thresholds in `reconciliation.py` are illustrative and would need
   calibration against real historical data before use.
+
+## License
+
+[MIT](./LICENSE)
