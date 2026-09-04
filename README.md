@@ -174,4 +174,4 @@ This is a scoped-down demo, not a production integration:
 
 ## License
 
-[MIT](./LICENSE)
+All rights reserved. See [LICENSE](./LICENSE).

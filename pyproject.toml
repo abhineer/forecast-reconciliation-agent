@@ -3,7 +3,7 @@ name = "forecast-reconciliation-agent"
 version = "0.1.0"
 description = "Agentic forecast reconciliation between top-down financial targets and bottom-up planner builds (Store Plan / Line Plan / Class Plan), powered by LangChain + Groq (GPT-OSS-20B)."
 readme = "README.md"
-license = "MIT"
+license = "LicenseRef-Proprietary"
 requires-python = ">=3.11"
 dependencies = [
     "langchain>=0.3.0",
