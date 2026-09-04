@@ -39,6 +39,31 @@ front end. See [HLD.md](./HLD.md) for the architecture and
   plan?" or "which classes have the biggest gap?" and a tool-calling
   LangChain agent answers by querying the same reconciliation logic.
 
+## User journey
+
+```mermaid
+flowchart TD
+    A[Pick your role] --> B[Load sample data or upload a CSV]
+    B --> C[Review variance table + gap % chart]
+    C --> D[Pick a class, click Analyze gap]
+    D --> E[Agent explains root cause + proposes a reconciled number]
+    E --> F{Agree with the agent?}
+    F -- Yes --> G["Approve: top-down / bottom-up / reconciled"]
+    F -- No --> H[Propose a different forecast + justification]
+    H --> I[Approve: use proposed forecast]
+    G --> J[Approved reconciliations table + CSV download]
+    I --> J
+    G --> K[Forecast lineage table + trend chart]
+    I --> K
+    K -.-> D
+    J -.-> L[Ask the Copilot: free-form Q&A]
+```
+
+Every path through **Approve** or **Propose → Approve** writes a chained
+event to the SQLite lineage log — the loop back into **Analyze gap** shows
+that a class can be revisited any number of times, each pass adding to the
+same audit trail.
+
 ## Project layout
 
 ```
@@ -105,7 +130,9 @@ bottom-up gap, along with the root-cause flags that were triggered
 (`rate_of_sale_shift`, `carryover_assumption`, `new_store_ramp`,
 `planner_disagreement`, `unexplained_gap`). A bar chart below the table
 shows the same gap % per class, sorted largest to smallest, colored by
-whether the top-down target or the bottom-up consensus is ahead.
+whether the top-down target or the bottom-up consensus is ahead:
+
+![Gap % by class, top-down vs. bottom-up](./docs/screenshots/variance-chart.png)
 
 To reconcile your own data instead, upload a CSV with the same columns as
 `sample_data/plans.csv`.
@@ -142,7 +169,9 @@ proposal, and approval, with who made it, the previous and new value, and
 the justification behind it. This comes straight from the SQLite database,
 so it survives app restarts. Below the table, a line chart plots the same
 history as a trajectory of the forecast number over time, so you can see
-at a glance whether proposals and approvals pulled the number up or down.
+at a glance whether proposals and approvals pulled the number up or down:
+
+![Forecast number over time, agent recommendation to proposal to approval](./docs/screenshots/lineage-chart.png)
 
 ### 6. Ask the copilot
 
